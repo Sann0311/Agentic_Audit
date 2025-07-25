@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  agent:
+    image: agent:latest
+    container_name: agent
+    build:
+      context: ./agent
+      dockerfile: tool.dockerfile
+    networks:
+      - appnet
+    environment:
+      # Ollama endpoint for your LLM
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+    volumes:
+      # Mount your Excel & reports folder
+      - ./attack_data:/attack_data
+
+  backend:
+    image: backend:latest
+    container_name: backend
+    build:
+      context: ./backend
+      dockerfile: backend.dockerfile
+    networks:
+      - appnet
+    ports:
+      - "5000:5000"
+    volumes:
+      # So FastAPI can import the agent package
+      - ./agent:/app/agent
+      # Your backend code
+      - ./backend:/app
+      # Data volume for reports
+      - ./attack_data:/attack_data
+
+networks:
+  appnet:
+    driver: bridge
