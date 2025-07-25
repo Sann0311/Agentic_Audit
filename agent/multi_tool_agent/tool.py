@@ -64,31 +64,48 @@ class ValidateParams(BaseModel):
     records: List[Dict[str, Any]]
 
 def validate_entries(params: ValidateParams) -> Dict[str, Any]:
-    """
-    Flags any row where 'Baseline Evidence' is missing.
-    """
     try:
         issues = []
         for idx, row in enumerate(params.records):
-            evidence = row.get("Baseline Evidence")
-            if evidence is None or evidence == "" or pd.isna(evidence):
-                issues.append({
-                    "row": idx + 2,  # account for header row in Excel
-                    "Question ID": row.get("Question ID"),
-                    "issue": "Missing Baseline Evidence"
-                })
-        
+            raw_evidence = row.get("Baseline Evidence", "")
+            conformity = row.get("Conformity Level", "").strip().lower()
+
+            # DEBUG
+            print(f"\n[DEBUG] Row {idx + 2}")
+            print(f"  Question ID: {row.get('Question ID')}")
+            print(f"  Baseline Evidence: {repr(raw_evidence)}")
+            print(f"  Conformity Level: {repr(conformity)}")
+
+            # Normalize evidence
+            if isinstance(raw_evidence, str):
+                normalized = raw_evidence.replace("\n", " ").replace("\r", "").strip()
+            else:
+                normalized = str(raw_evidence).strip()
+
+            # Skip if evidence is sufficient or conformity is full
+            if normalized and normalized.lower() not in ("nan", "none") or conformity == "full conformity":
+                continue
+
+            # Flag missing evidence
+            issues.append({
+                "row": idx + 2,
+                "Question ID": row.get("Question ID", ""),
+                "issue": "Missing Baseline Evidence"
+            })
+
         return {
             "status": "success",
             "issues": issues,
             "total_issues": len(issues)
         }
+
     except Exception as e:
         return {
             "status": "error",
             "message": str(e),
             "issues": []
         }
+
 
 
 # 3. ASSIGN CONFORMITY

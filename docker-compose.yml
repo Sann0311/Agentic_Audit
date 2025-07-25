@@ -15,6 +15,12 @@ services:
     volumes:
       # Mount your Excel & reports folder
       - ./attack_data:/attack_data
+    develop:
+      watch:
+        - action: sync
+          path: ./agent/multi_tool_agent
+          target: /workspace/multi_tool_agent
+
 
   backend:
     image: backend:latest
