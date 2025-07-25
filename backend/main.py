@@ -19,6 +19,17 @@ if AGENT_DIR not in sys.path:
 # Pylance may not resolve this dynamic import:
 from multi_tool_agent.agent import root_agent  # type: ignore
 
+# Also import the tool functions directly for direct invocation
+# Import from the tool.py file in the agent directory
+sys.path.append(os.path.join(AGENT_DIR, "multi_tool_agent"))
+from tool import (
+    load_audit_sheet, LoadParams,
+    validate_entries, ValidateParams, 
+    assign_conformity, AssignParams,
+    summarize_findings, SummarizeParams,
+    export_to_excel, ExportParams
+)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # FastAPI setup
 # ──────────────────────────────────────────────────────────────────────────────
@@ -31,26 +42,22 @@ app.add_middleware(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Tool mapping for direct invocation
+# ──────────────────────────────────────────────────────────────────────────────
+TOOL_MAPPING = {
+    "load_audit_sheet": (load_audit_sheet, LoadParams),
+    "validate_entries": (validate_entries, ValidateParams),
+    "assign_conformity": (assign_conformity, AssignParams),
+    "summarize_findings": (summarize_findings, SummarizeParams),
+    "export_to_excel": (export_to_excel, ExportParams),
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Models
 # ──────────────────────────────────────────────────────────────────────────────
 class RunRequest(BaseModel):
     tool: str
     params: Dict[str, Any]
-
-class Session(BaseModel):
-    # ADK expects `session` to have a `.state` attribute
-    state: Dict[str, Any] = {}
-
-class AgentRunPayload(BaseModel):
-    """
-    Envelope that run_async expects:
-    - tool: the tool name
-    - params: its parameters
-    - session: a Session object with .state
-    """
-    tool: str
-    params: Dict[str, Any]
-    session: Session
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Endpoints
@@ -64,43 +71,60 @@ async def create_session():
     # No real session tracking needed; return a dummy
     return {"session_id": "default"}
 
-
-from fastapi import Request
-
 @app.post("/api/run")
-async def run_tool(request: Request):
+async def run_tool(request: RunRequest):
     """
-    Invoke one of the agent’s tools headlessly and return the final output.
-    Accepts raw JSON for better compatibility with PowerShell and other clients.
+    Invoke one of the agent's tools directly and return the output.
+    This bypasses the agent conversation interface and calls tools directly.
     """
     try:
-        data = await request.json()
-        tool = data.get("tool")
-        params = data.get("params", {})
-        payload = AgentRunPayload(
-            tool=tool,
-            params=params,
-            session=Session()
-        )
-        gen = root_agent.run_async(payload)
-        final_output = None
-        async for msg in gen:
-            final_output = msg
-        if hasattr(final_output, "model_dump"):
-            return final_output.model_dump()
-        return final_output
+        tool_name = request.tool
+        params = request.params
+        
+        print(f"Received request - Tool: {tool_name}, Params: {params}")
+        
+        # Check if tool exists
+        if tool_name not in TOOL_MAPPING:
+            available_tools = list(TOOL_MAPPING.keys())
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Tool '{tool_name}' not found. Available tools: {available_tools}"
+            )
+        
+        # Get the tool function and parameter model
+        tool_func, param_model = TOOL_MAPPING[tool_name]
+        
+        # Validate and create parameters
+        try:
+            validated_params = param_model(**params)
+            print(f"Validated params: {validated_params}")
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parameter validation failed for {tool_name}: {str(e)}"
+            )
+        
+        # Call the tool function
+        result = tool_func(validated_params)
+        print(f"Tool result: {result}")
+        
+        return result
+        
+    except HTTPException:
+        raise
     except Exception as exc:
+        print(f"Unexpected error: {str(exc)}")
         raise HTTPException(status_code=500, detail=str(exc))
-
 
 @app.get("/api/get_reports")
 async def get_reports():
     reports: List[Dict[str, Any]] = []
     data_dir = "/attack_data"
-    for fname in os.listdir(data_dir):
-        if fname.endswith(".json") and "REPORT" in fname:
-            with open(os.path.join(data_dir, fname), "r") as f:
-                reports.append(json.load(f))
+    if os.path.exists(data_dir):
+        for fname in os.listdir(data_dir):
+            if fname.endswith(".json") and "REPORT" in fname:
+                with open(os.path.join(data_dir, fname), "r") as f:
+                    reports.append(json.load(f))
     return reports
 
 @app.get("/api/attack_data/{filename}")

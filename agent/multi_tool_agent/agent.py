@@ -6,7 +6,8 @@ from google.adk.models.lite_llm import LiteLlm
 from google.genai import types
 
 # Import your tool functions directly
-from tool import (
+
+from .tool import (
     load_audit_sheet,
     validate_entries,
     assign_conformity,
