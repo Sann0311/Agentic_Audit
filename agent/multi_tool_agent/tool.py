@@ -1,7 +1,79 @@
-# agent/tool.py
 
 from typing import Any, Dict, List
 from pydantic import BaseModel
+import pandas as pd
+import numpy as np
+
+# 4. SUMMARIZE FINDINGS
+
+class SummarizeParams(BaseModel):
+    records: List[Dict[str, Any]]
+
+def summarize_findings(params: SummarizeParams) -> Dict[str, Any]:
+    """
+    Returns a count and percentage of each conformity level.
+    """
+    try:
+        counts = {}
+        total = len(params.records)
+        for row in params.records:
+            lvl = row.get("Conformity Level", "N/A")
+            counts[lvl] = counts.get(lvl, 0) + 1
+        # Build a summary dict
+        summary = {}
+        for lvl, cnt in counts.items():
+            percentage = round((cnt / total) * 100, 2) if total > 0 else 0.0
+            summary[lvl] = {
+                "count": cnt,
+                "percentage": percentage
+            }
+        return {
+            "status": "success",
+            "summary": summary,
+            "total_records": total
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "summary": {}
+        }
+
+# 3. ASSIGN CONFORMITY PARAMS
+class AssignParams(BaseModel):
+    records: List[Dict[str, Any]]
+
+# --- Conformity Assignment Logic ---
+def assign_conformity_level(observation: str, baseline_evidence: str) -> str:
+    """
+    Assigns conformity level based on comparison of observation and baseline evidence.
+    This is a simple rule-based version. You can replace with LLM/semantic logic if needed.
+    """
+    if not isinstance(observation, str) or not observation.strip():
+        return "N/A"
+    if not isinstance(baseline_evidence, str) or not baseline_evidence.strip():
+        return "No Conformity"
+    obs = observation.strip().lower()
+    base = baseline_evidence.strip().lower()
+    # Full conformity: observation contains all key evidence words (very basic)
+    if base in obs or obs in base:
+        return "Full Conformity"
+    # Partial: some overlap (very basic, can be improved)
+    obs_words = set(obs.split())
+    base_words = set(base.split())
+    overlap = obs_words & base_words
+    if overlap and (len(overlap) >= min(3, len(base_words))):
+        return "Partial Conformity"
+    # No conformity: observation present but not matching evidence
+    return "No Conformity"
+
+# agent/tool.py
+
+
+from typing import Any, Dict, List
+from pydantic import BaseModel
+import pandas as pd
+import numpy as np
 import pandas as pd
 import numpy as np
 
@@ -64,78 +136,24 @@ class ValidateParams(BaseModel):
     records: List[Dict[str, Any]]
 
 def validate_entries(params: ValidateParams) -> Dict[str, Any]:
-    try:
-        issues = []
-        for idx, row in enumerate(params.records):
-            raw_evidence = row.get("Baseline Evidence", "")
-            conformity = row.get("Conformity Level", "").strip().lower()
-
-            # DEBUG
-            print(f"\n[DEBUG] Row {idx + 2}")
-            print(f"  Question ID: {row.get('Question ID')}")
-            print(f"  Baseline Evidence: {repr(raw_evidence)}")
-            print(f"  Conformity Level: {repr(conformity)}")
-
-            # Normalize evidence
-            if isinstance(raw_evidence, str):
-                normalized = raw_evidence.replace("\n", " ").replace("\r", "").strip()
-            else:
-                normalized = str(raw_evidence).strip()
-
-            # Skip if evidence is sufficient or conformity is full
-            if normalized and normalized.lower() not in ("nan", "none") or conformity == "full conformity":
-                continue
-
-            # Flag missing evidence
-            issues.append({
-                "row": idx + 2,
-                "Question ID": row.get("Question ID", ""),
-                "issue": "Missing Baseline Evidence"
-            })
-
-        return {
-            "status": "success",
-            "issues": issues,
-            "total_issues": len(issues)
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "issues": []
-        }
-
-
-
-# 3. ASSIGN CONFORMITY
-
-class AssignParams(BaseModel):
-    records: List[Dict[str, Any]]
+    # ...existing code...
+    pass
 
 def assign_conformity(params: AssignParams) -> Dict[str, Any]:
     """
-    Sets 'Conformity Level' to Full if evidence exists, 
-    otherwise None. (Customize logic for Partial as needed.)
+    Assigns 'Conformity Level' for each record based on comparison of Observation and Baseline Evidence.
+    Levels: Full Conformity, Partial Conformity, No Conformity, N/A
     """
     try:
         updated = []
         for row in params.records:
-            evidence = row.get("Baseline Evidence")
-            
-            # Check if evidence exists and is not empty
-            if evidence is not None and str(evidence).strip() != "" and not pd.isna(evidence):
-                level = "Full"
-            else:
-                level = "None"
-            
+            observation = row.get("Observation", "")
+            baseline_evidence = row.get("Baseline Evidence", "")
+            conformity = assign_conformity_level(observation, baseline_evidence)
             new_row = row.copy()
-            new_row["Conformity Level"] = level
+            new_row["Conformity Level"] = conformity
             updated.append(new_row)
-        
-        # Clean the updated records for JSON
         clean_updated = clean_for_json(updated)
-        
         return {
             "status": "success",
             "records": clean_updated
@@ -146,25 +164,15 @@ def assign_conformity(params: AssignParams) -> Dict[str, Any]:
             "message": str(e),
             "records": []
         }
-
-
-# 4. SUMMARIZE FINDINGS
-
-class SummarizeParams(BaseModel):
-    records: List[Dict[str, Any]]
-
-def summarize_findings(params: SummarizeParams) -> Dict[str, Any]:
     """
     Returns a count and percentage of each conformity level.
     """
     try:
         counts = {}
         total = len(params.records)
-        
         for row in params.records:
-            lvl = row.get("Conformity Level", "None")
+            lvl = row.get("Conformity Level", "N/A")
             counts[lvl] = counts.get(lvl, 0) + 1
-
         # Build a summary dict
         summary = {}
         for lvl, cnt in counts.items():
@@ -173,7 +181,6 @@ def summarize_findings(params: SummarizeParams) -> Dict[str, Any]:
                 "count": cnt,
                 "percentage": percentage
             }
-        
         return {
             "status": "success",
             "summary": summary,
@@ -185,6 +192,7 @@ def summarize_findings(params: SummarizeParams) -> Dict[str, Any]:
             "message": str(e),
             "summary": {}
         }
+                # ...existing code...
 
 
 # 5. EXPORT TO EXCEL
@@ -200,7 +208,6 @@ def export_to_excel(params: ExportParams) -> Dict[str, Any]:
     try:
         df = pd.DataFrame(params.records)
         df.to_excel(params.output_path, index=False)
-        
         return {
             "status": "success",
             "output_path": params.output_path,
